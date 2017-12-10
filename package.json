@@ -1,0 +1,20 @@
+{
+  "name": "x-split-pane",
+  "version": "0.0.1",
+  "description": "custom element implementation of split panes",
+  "main": "dist/index.js",
+  "dependencies": {
+    "rollup": "^0.52.1"
+  },
+  "devDependencies": {
+    "watchy": "^0.7.0"
+  },
+  "scripts": {
+    "build": "rollup src/index.js --output.format umd --name 'x-split-pane' --output.file dist/index.js",
+    "watch": "watchy -w src -- npm run build",
+    "demo": "rollup doc/demo.js --output.format umd --name 'x-split-pane' --output.file doc/demo.dist.js",
+    "test": "tape **/*_test.js"
+  },
+  "author": "",
+  "license": "ISC"
+}
