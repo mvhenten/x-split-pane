@@ -17,15 +17,7 @@ function h(el, attributes, ...contents) {
     return parent;
 }
 
-class StyleUtil extends HTMLElement {
-    setStyle(style) {
-        for (let key in style) {
-            this.style[key] = style[key];
-        }
-    }
-}
-
-class BaseUtil extends StyleUtil {
+class BaseUtil extends HTMLElement {
     constructor() {
         super();
         this.dimensions = {};
@@ -56,4 +48,4 @@ class BaseUtil extends StyleUtil {
     }
 }
 
-export { h, BaseUtil, StyleUtil };
+export { h, BaseUtil };

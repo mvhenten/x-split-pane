@@ -1,57 +1,97 @@
-import { h, StyleUtil } from "./util";
+import { h } from "./util";
 
-class Wrapper extends StyleUtil {
+class Wrapper extends HTMLElement {
+  static get observedAttributes() {return ['direction']; }
+  
     constructor() {
         super();
+        const root = this.createShadowRoot();
 
-        const panes = h("x-split-pane", {
-            direction: this.getAttribute("pane-direction")
-        });
+        root.innerHTML = `
+            <style>
+                :host {
+                    display: block;
+                    position: relative;
+                    width: 100%;
+                    height: 100%;
+                }
+                
+                x-split-pane-panels[direction="horizontal"] x-split-pane-grip {
+                    cursor: col-resize;
+                    width: var(--x-panel-grip-size, 3px);
+                    top: 0;
+                    bottom: 0;
+                }
 
-        this.panes = panes;
-        this.root = this.createShadowRoot();
-        this.root.appendChild(panes);
+                x-split-pane-panels[direction="vertical"] x-split-pane-grip {
+                    cursor: row-resize;
+                    height: var(--x-panel-grip-size, 3px);
+                    left: 0;
+                    right: 0;
+                }
+
+                x-split-pane-grip {
+                    background-color: #eee;
+                    z-index: 100;
+                    box-sizing: border-box;
+                    display: block;
+                    position: absolute;
+                }
+                
+                x-split-pane-panels {
+                    display: block;
+                    position: absolute;
+                    top: 0;
+                    bottom: 0;
+                    left: 0;
+                    right: 0;
+                }
+                
+                x-split-pane-pane {
+                    z-index: 50;
+                    display: block;
+                    box-sizing: border-box;
+                    position: absolute;
+                    overflow: auto;
+                    height: 100%;
+                    width: 100%;
+                    border: var(--x-panel-pane-border, 1px inset #f9f9f9);
+                }
+            </style>
+        `;
+
+
+        const panes = h("x-split-pane-panels");
+
+        root.appendChild(panes);
 
         window.addEventListener("resize", () => {
             panes.distribute();
         });
-    }
-
-    connectedCallback() {
-        this.setStyle({
-            display: "block",
-            position: "relative",
-            width: "100%",
-            height: "100%",
-            backgroundColor: "#990000"
-        });
+        
+        this.panes = panes;
+        this.root = root;
     }
 
     appendChild(...args) {
         this.panes.appendChild(...args);
     }
+
+    connectedCallback() {
+        this.panes.setAttribute("direction", this.getAttribute("direction"));
+    }
 }
 
-class Component extends StyleUtil {
+class Component extends HTMLElement {
     get size() {
         return this.horizontal ? this.clientWidth : this.clientHeight;
     }
 
     get horizontal() {
-        return this.getAttribute("pane-direction") != "vertical";
+        return this.getAttribute("direction") != "vertical";
     }
 
     connectedCallback() {
-        this.setStyle({
-            display: "block",
-            position: "absolute",
-            top: 0,
-            bottom: 0,
-            left: 0,
-            right: 0,
-        });
-
-        this.mounted = true;
         this.distribute();
     }
 
@@ -68,35 +108,35 @@ class Component extends StyleUtil {
         }, this.size);
     }
 
-    appendChild(...args) {
-        if (this.childNodes.length)
-            this.appendGrip();
+    appendChild(content) {
+        const children = this.children;
+        let resize = !!children.length && this.lastChild.resizable;
 
-        this.appendPanel(...args);
+        if (resize) this.prependGrip();
+        this.appendPanel(content);
     }
 
     appendPanel(content) {
         const slot = h("slot", null, content);
 
-        const attributes = {
-            "pane-direction": this.getAttribute("pane-direction"),
-            "pane-size": content.getAttribute("pane-size"),
-            "pane-resizable": content.getAttribute("pane-resizable")
-        };
+        const pane = h("x-split-pane-pane", {
+            resizable: content.getAttribute("resizable"),
+            size: content.getAttribute("size")
+        }, slot);
 
-        const pane = h("x-split-pane-hpane", attributes, slot);
+        pane.addEventListener("connected", this.distribute.bind(this));
 
         super.appendChild(pane);
-        pane.addEventListener("connected", () => this.distribute());
     }
 
-    appendGrip() {
-        const grip = h("x-split-pane-hgrip");
-        super.appendChild(grip);
+    prependGrip() {
+        const grip = h("x-split-pane-grip");
 
         grip.addEventListener("move", ({ target, detail }) => {
             this.resizePane(target, detail);
         });
+
+        super.appendChild(grip);
     }
 
     resizePane(grip, delta) {
@@ -125,10 +165,14 @@ class Component extends StyleUtil {
         return panels.map((panel, index) => {
             if (index == panels.length - 1)
                 return availableSize - allocatedSize;
-
-            const scale = panel.size / panelSize;
-            const size = Math.round(availableSize * scale);
-
+                
+            let size = panel.size;
+                
+            if (panel.resizable) {
+                const scale = panel.size / panelSize;
+                size = Math.round(availableSize * scale);
+            }
+            
             allocatedSize += size;
 
             return size;

@@ -1,10 +1,14 @@
 import { h, BaseUtil } from "./util";
 
 export default class Pane extends BaseUtil {
+    get resizable() {
+        return "" + this.getAttribute("resizable") != "false";
+    }
+
     calculateSize() {
         const { availableSize, panels } = this.parentNode;
 
-        let size = this.firstChild.getAttribute("pane-size");
+        let size = this.getAttribute("sxize");
 
         if (/px$/.test(size))
             size = parseInt(size, 10);
@@ -19,22 +23,10 @@ export default class Pane extends BaseUtil {
     }
 
     connectedCallback() {
-        this.setStyle({
-            zIndex: 50,
-            display: "block",
-            boxSizing: "border-box",
-            position: "absolute",
-            overflow: "auto",
-            height: "100%",
-            width: "100%",
-            backgroundColor: "#009",
-            border: "1px solid black",
-        });
-
-        this.calculateSize();
-        this.connected = true;
-
         let event = new CustomEvent("connected", { target: this });
+
+        this.connected = true;
+        this.calculateSize();
         this.dispatchEvent(event);
     }
 }

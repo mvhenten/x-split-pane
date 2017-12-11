@@ -6,7 +6,8 @@ export default class Grip extends BaseUtil {
     }
 
     get size() {
-        return this.getAttribute("grip-size") || 4;
+        let key = this.parentNode.horizontal ? "clientWidth" : "clientHeight";
+        return this[key];
     }
 
     set size(value) {
@@ -20,50 +21,31 @@ export default class Grip extends BaseUtil {
         if (evt.stopPropagation) evt.stopPropagation();
         if (evt.preventDefault) evt.preventDefault();
 
-        let key = this.parentNode.horizontal ? "screenX" : "screenY";
-        let pos = evt[key];
+        let pos = this.getMousePosition(evt);
         let delta = pos - this.pos;
 
-        let event = new CustomEvent("move", { target: this, detail: delta });
-
         this.pos = pos;
-        this.dispatchEvent(event);
+        this.dispatchEvent(new CustomEvent("move", { 
+            target: this, 
+            detail: delta
+        }));
     }
 
     attach(evt) {
         this.active = true;
-        let key = this.parentNode.horizontal ? "screenX" : "screenY";
-        this.pos = evt[key];
+        this.pos = this.getMousePosition(evt);
     }
 
     release(evt) {
         this.active = null;
     }
+    
+    getMousePosition(evt) {
+        let key = this.parentNode.horizontal ? "screenX" : "screenY";
+        return evt[key];
+    }
 
     connectedCallback() {
-        this.setStyle({
-            zIndex: 100,
-            cursor: "pointer",
-            boxSizing: "border-box",
-            display: "block",
-            position: "absolute",
-        });
-
-        if (this.parentNode.horizontal) {
-            this.setStyle({
-                width: `${this.size}px`,
-                top: 0,
-                bottom: 0
-            });
-        }
-        else {
-            this.setStyle({
-                height: `${this.size}px`,
-                left: 0,
-                right: 0
-            });
-        }
-
         this.addEventListener("mousedown", this.attach.bind(this));
         window.addEventListener("mouseup", () => this.release());
         this.parentNode.addEventListener("mousemove", (evt) => this.move(evt));
