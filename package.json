@@ -13,6 +13,7 @@
     "build": "rollup src/index.js --output.format umd --name 'x-split-pane' --output.file dist/index.js",
     "watch": "watchy -w src -- npm run build",
     "demo": "rollup doc/demo.js --output.format umd --name 'x-split-pane' --output.file doc/demo.dist.js",
+    "watch-demo": "watchy -w src -- npm run demo",
     "test": "tape **/*_test.js"
   },
   "author": "",
