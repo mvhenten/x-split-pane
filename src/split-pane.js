@@ -1,199 +1,192 @@
 import { h } from "./util";
 
+const css = `
+    <style>
+        :host {
+            height: 100%;
+        }
+        
+
+        x-split-pane-grip {
+        }
+        
+        
+        x-split-pane-panels[direction="rows"] x-split-pane-grip {
+            height: 4px;
+            background: blue;
+            cursor: row-resize;            
+        }
+
+        x-split-pane-panels[direction="cols"] x-split-pane-grip {
+            width: 4px;
+            background: red;
+            cursor: col-resize;            
+        }
+
+        x-split-pane-panels {
+            height: 70vh;
+            background: #eee;
+            box-sizing: border-box;
+            display: flex;
+            position: relative;
+        }
+        
+        x-split-pane-pane {
+            box-sizing: border-box;
+            background: #eef;
+            flex-grow: 1;
+            overflow: hidden;
+        }
+    </style>
+`;
+
 class Wrapper extends HTMLElement {
-  static get observedAttributes() {return ['direction']; }
-  
     constructor() {
         super();
         const root = this.createShadowRoot();
-
-        root.innerHTML = `
-            <style>
-                :host {
-                    display: block;
-                    position: relative;
-                    width: 100%;
-                    height: 100%;
-                }
-                
-                x-split-pane-panels[direction="horizontal"] x-split-pane-grip {
-                    cursor: col-resize;
-                    width: var(--x-panel-grip-size, 3px);
-                    top: 0;
-                    bottom: 0;
-                }
-
-                x-split-pane-panels[direction="vertical"] x-split-pane-grip {
-                    cursor: row-resize;
-                    height: var(--x-panel-grip-size, 3px);
-                    left: 0;
-                    right: 0;
-                }
-
-                x-split-pane-grip {
-                    background-color: #eee;
-                    z-index: 100;
-                    box-sizing: border-box;
-                    display: block;
-                    position: absolute;
-                }
-                
-                x-split-pane-panels {
-                    display: block;
-                    position: absolute;
-                    top: 0;
-                    bottom: 0;
-                    left: 0;
-                    right: 0;
-                }
-                
-                x-split-pane-pane {
-                    z-index: 50;
-                    display: block;
-                    box-sizing: border-box;
-                    position: absolute;
-                    overflow: auto;
-                    height: 100%;
-                    width: 100%;
-                    border: var(--x-panel-pane-border, 1px inset #f9f9f9);
-                }
-            </style>
-        `;
-
-
         const panes = h("x-split-pane-panels");
 
+        root.innerHTML = css;
         root.appendChild(panes);
 
-        window.addEventListener("resize", () => {
-            panes.distribute();
-        });
-        
         this.panes = panes;
         this.root = root;
     }
 
     appendChild(...args) {
+        console.log(this.root.children);
         this.panes.appendChild(...args);
     }
 
     connectedCallback() {
-        this.panes.setAttribute("direction", this.getAttribute("direction"));
+        this.panes.setAttribute("direction", this.getAttribute("direction") || "cols");
     }
 }
 
-class Component extends HTMLElement {
+class Panes extends HTMLElement {
+    constructor() {
+        super();
+        
+        document.addEventListener("mousemove", this.resize.bind(this));
+        document.addEventListener("mouseup", () => {
+            this.active = false;
+        });
+    }
+    
+    get isColumns() {
+        return this.getAttribute("direction") != "rows";
+    }
+    
     get size() {
-        return this.horizontal ? this.clientWidth : this.clientHeight;
+        if (this.isColumns)
+            return this.clientWidth;
+        this.clientHeight;
     }
 
-    get horizontal() {
-        return this.getAttribute("direction") != "vertical";
-    }
-
-    connectedCallback() {
-        this.distribute();
-    }
-
-    get panels() {
-        return Array.from(this.children)
-            .filter(child => !child.isGrip);
-    }
-
-    get availableSize() {
-        return Array.from(this.children).reduce((size, child) => {
-            if (child.isGrip)
-                return size - child.size;
-            return size;
-        }, this.size);
+    clientPos(evt) {
+        if (this.isColumns)
+            return evt.clientX;
+        return evt.clientY;
     }
 
     appendChild(content) {
-        const children = this.children;
-        let resize = !!children.length && this.lastChild.resizable;
-
-        if (resize) this.prependGrip();
-        this.appendPanel(content);
-    }
-
-    appendPanel(content) {
-        const slot = h("slot", null, content);
-
-        const pane = h("x-split-pane-pane", {
-            resizable: content.getAttribute("resizable"),
-            size: content.getAttribute("size")
-        }, slot);
-
-        pane.addEventListener("connected", this.distribute.bind(this));
-
+        let pane = h("x-split-pane-pane");
+        
+        if (this.children.length)
+            this.appendGrip();
+            
+        pane.appendChild(content);
         super.appendChild(pane);
     }
-
-    prependGrip() {
-        const grip = h("x-split-pane-grip");
-
-        grip.addEventListener("move", ({ target, detail }) => {
-            this.resizePane(target, detail);
-        });
-
+    
+    appendGrip() {
+        let grip = h("x-split-pane-grip");
+        grip.addEventListener("mousedown", this.activate.bind(this));
         super.appendChild(grip);
     }
 
-    resizePane(grip, delta) {
-        let before = grip.previousSibling;
-        let after = grip.nextSibling;
-        let offset = grip.offset + delta;
+    activate(evt) {
+        let {target} = evt;
+        
+        let clientPos = this.clientPos(evt);
+        let children = Array.from(this.children);
+        let panes = children.filter(child => child.pane);
+        let prev = children[children.indexOf(target) - 1];
 
-        if (before.offset > offset)
-            return;
+        let sizes = panes.map(pane => (pane.size / this.size) * 100);
 
-        if (after.size - delta <= 0)
-            return;
+        this.active = true;
+        this.distribute(panes, sizes);
 
-        before.size = before.size + delta;
-        after.size = after.size - delta;
-        after.offset = after.offset + delta;
-        grip.offset = grip.offset + delta;
+        this.pos = {
+            panes: panes.slice(panes.indexOf(prev)),
+            prev,
+            clientPos
+        };
     }
-
-    calculatePanelSize() {
-        const { availableSize, panels } = this;
-        const panelSize = panels.reduce((panelSize, panel) => panelSize += panel.size, 0);
-
-        let allocatedSize = 0;
-
-        return panels.map((panel, index) => {
-            if (index == panels.length - 1)
-                return availableSize - allocatedSize;
-                
-            let size = panel.size;
-                
-            if (panel.resizable) {
-                const scale = panel.size / panelSize;
-                size = Math.round(availableSize * scale);
-            }
-            
-            allocatedSize += size;
-
-            return size;
-        });
+    
+    distribute(panes, sizes) {
+        for (let child of panes) {
+            child.style.flexBasis = sizes.shift() + "%";
+        }
     }
+    
+    resize(evt) {
+        if (!this.active) return;
+        
+        let {panes, prev, clientPos} = this.pos;
+        let evtClientPos = this.clientPos(evt);
+        let delta = clientPos - evtClientPos;
+        let prevSize = (prev.size - delta) / this.size * 100;
 
-    distribute() {
-        if (!this.panels.every(panel => panel.connected))
+        this.pos.clientPos = evtClientPos;
+
+        if (prevSize < 0)
             return;
 
-        const panelSizes = this.calculatePanelSize();
-        let offset = 0;
+        let sizeRight = panes.reduce((sum, pane) => {
+        	if (pane == prev) return sum;
+			return sum += pane.size;
+        }, 0);
 
-        Array.from(this.children).forEach((child, index) => {
-            if (!child.isGrip)
-                child.size = panelSizes.shift();
+        // get the new right
+        let newRight = sizeRight + delta;
 
-            child.offset = offset;
-            offset += child.size;
+        // first, get percentage of the right for each pane right
+        // get size in pixel for the new right
+        // then get percentage of the total
+        let sizes = panes.map((pane) => {
+        	if (pane == prev)
+            	return prevSize;
+
+            let newSizePixel = Math.round((pane.size / sizeRight) * newRight);
+            return (newSizePixel / this.size) * 100;
         });
+        
+        this.distribute(panes, sizes);
     }
 }
 
-export { Wrapper, Component };
+class Pane extends HTMLElement {
+    get pane() {
+        return true;
+    }
+    
+    get size() {
+        if (this.parentNode.isColumns)
+            return this.clientWidth;
+        this.clientHeight;
+    }
+}
+
+class Grip extends HTMLElement {
+    
+}
+
+customElements.define("x-split-pane-panels", Panes);
+customElements.define("x-split-pane-pane", Pane);
+customElements.define("x-split-pane-grip", Grip);
+
+
+
+export { Wrapper };
