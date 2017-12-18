@@ -1,21 +1,3 @@
-function h(el, attributes, ...contents) {
-    const parent = document.createElement(el);
-
-    if (attributes) {
-        for (let key in attributes) {
-            parent.setAttribute(key, attributes[key]);
-        }
-    }
-
-    contents.forEach(content => {
-        if (typeof content == "string")
-            content = document.createTextNode(content);
-
-        parent.appendChild(content);
-    });
-
-    return parent;
-}
 
 class BaseUtil extends HTMLElement {
     constructor() {
@@ -48,4 +30,4 @@ class BaseUtil extends HTMLElement {
     }
 }
 
-export { h, BaseUtil };
+export {  BaseUtil };

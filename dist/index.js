@@ -38,6 +38,9 @@ class BaseUtil extends StyleUtil {
     }
 
     get size() {
+        // if (this.calculateSize)
+        //     console.log(this.calculateSize(), 'calculated');
+
         if (this.dimensions.size)
             return this.dimensions.size;
 
@@ -63,34 +66,84 @@ class BaseUtil extends StyleUtil {
 }
 
 class Wrapper extends StyleUtil {
+  static get observedAttributes() {return ['direction']; }
+  
     constructor() {
         super();
+        const root = this.createShadowRoot();
 
-        const panes = h("x-split-pane", {
-            direction: this.getAttribute("pane-direction")
-        });
+        root.innerHTML = `
+            <style>
+                :host {
+                    display: block;
+                    position: relative;
+                    width: 100%;
+                    height: 100%;
+                }
+                
+                x-split-pane-panels[direction="horizontal"] x-split-pane-grip {
+                    cursor: col-resize;
+                    width: var(--x-panel-grip-size, 3px);
+                    top: 0;
+                    bottom: 0;
+                }
 
-        this.panes = panes;
-        this.root = this.createShadowRoot();
-        this.root.appendChild(panes);
+                x-split-pane-panels[direction="vertical"] x-split-pane-grip {
+                    cursor: row-resize;
+                    height: var(--x-panel-grip-size, 3px);
+                    left: 0;
+                    right: 0;
+                }
+
+                x-split-pane-grip {
+                    background-color: #eee;
+                    z-index: 100;
+                    box-sizing: border-box;
+                    display: block;
+                    position: absolute;
+                }
+                
+                x-split-pane-panels {
+                    display: block;
+                    position: absolute;
+                    top: 0;
+                    bottom: 0;
+                    left: 0;
+                    right: 0;
+                }
+                
+                x-split-pane-pane {
+                    z-index: 50;
+                    display: block;
+                    box-sizing: border-box;
+                    position: absolute;
+                    overflow: auto;
+                    height: 100%;
+                    width: 100%;
+                    border: var(--x-panel-pane-border, 1px inset #f9f9f9);
+                }
+            </style>
+        `;
+
+
+        const panes = h("x-split-pane-panels");
+
+        root.appendChild(panes);
 
         window.addEventListener("resize", () => {
             panes.distribute();
         });
-    }
-
-    connectedCallback() {
-        this.setStyle({
-            display: "block",
-            position: "relative",
-            width: "100%",
-            height: "100%",
-            backgroundColor: "#990000"
-        });
+        
+        this.panes = panes;
+        this.root = root;
     }
 
     appendChild(...args) {
         this.panes.appendChild(...args);
+    }
+
+    connectedCallback() {
+        this.panes.setAttribute("direction", this.getAttribute("direction"));
     }
 }
 
@@ -100,20 +153,10 @@ class Component extends StyleUtil {
     }
 
     get horizontal() {
-        return this.getAttribute("pane-direction") != "vertical";
+        return this.getAttribute("direction") != "vertical";
     }
 
     connectedCallback() {
-        this.setStyle({
-            display: "block",
-            position: "absolute",
-            top: 0,
-            bottom: 0,
-            left: 0,
-            right: 0,
-        });
-
-        this.mounted = true;
         this.distribute();
     }
 
@@ -130,35 +173,35 @@ class Component extends StyleUtil {
         }, this.size);
     }
 
-    appendChild(...args) {
-        if (this.childNodes.length)
-            this.appendGrip();
+    appendChild(content) {
+        const children = this.children;
+        let resize = !!children.length && this.lastChild.resizable;
 
-        this.appendPanel(...args);
+        if (resize) this.prependGrip();
+        this.appendPanel(content);
     }
 
     appendPanel(content) {
         const slot = h("slot", null, content);
 
-        const attributes = {
-            "pane-direction": this.getAttribute("pane-direction"),
-            "pane-size": content.getAttribute("pane-size"),
-            "pane-resizable": content.getAttribute("pane-resizable")
-        };
+        const pane = h("x-split-pane-pane", {
+            resizable: content.getAttribute("resizable"),
+            size: content.getAttribute("size")
+        }, slot);
 
-        const pane = h("x-split-pane-hpane", attributes, slot);
+        pane.addEventListener("connected", this.distribute.bind(this));
 
         super.appendChild(pane);
-        pane.addEventListener("connected", () => this.distribute());
     }
 
-    appendGrip() {
-        const grip = h("x-split-pane-hgrip");
-        super.appendChild(grip);
+    prependGrip() {
+        const grip = h("x-split-pane-grip");
 
         grip.addEventListener("move", ({ target, detail }) => {
             this.resizePane(target, detail);
         });
+
+        super.appendChild(grip);
     }
 
     resizePane(grip, delta) {
@@ -187,10 +230,14 @@ class Component extends StyleUtil {
         return panels.map((panel, index) => {
             if (index == panels.length - 1)
                 return availableSize - allocatedSize;
-
-            const scale = panel.size / panelSize;
-            const size = Math.round(availableSize * scale);
-
+                
+            let size = panel.size;
+                
+            if (panel.resizable) {
+                const scale = panel.size / panelSize;
+                size = Math.round(availableSize * scale);
+            }
+            
             allocatedSize += size;
 
             return size;
@@ -220,7 +267,8 @@ class Grip extends BaseUtil {
     }
 
     get size() {
-        return this.getAttribute("grip-size") || 4;
+        let key = this.parentNode.horizontal ? "clientWidth" : "clientHeight";
+        return this[key];
     }
 
     set size(value) {
@@ -234,50 +282,31 @@ class Grip extends BaseUtil {
         if (evt.stopPropagation) evt.stopPropagation();
         if (evt.preventDefault) evt.preventDefault();
 
-        let key = this.parentNode.horizontal ? "screenX" : "screenY";
-        let pos = evt[key];
+        let pos = this.getMousePosition(evt);
         let delta = pos - this.pos;
 
-        let event = new CustomEvent("move", { target: this, detail: delta });
-
         this.pos = pos;
-        this.dispatchEvent(event);
+        this.dispatchEvent(new CustomEvent("move", { 
+            target: this, 
+            detail: delta
+        }));
     }
 
     attach(evt) {
         this.active = true;
-        let key = this.parentNode.horizontal ? "screenX" : "screenY";
-        this.pos = evt[key];
+        this.pos = this.getMousePosition(evt);
     }
 
     release(evt) {
         this.active = null;
     }
+    
+    getMousePosition(evt) {
+        let key = this.parentNode.horizontal ? "screenX" : "screenY";
+        return evt[key];
+    }
 
     connectedCallback() {
-        this.setStyle({
-            zIndex: 100,
-            cursor: "pointer",
-            boxSizing: "border-box",
-            display: "block",
-            position: "absolute",
-        });
-
-        if (this.parentNode.horizontal) {
-            this.setStyle({
-                width: `${this.size}px`,
-                top: 0,
-                bottom: 0
-            });
-        }
-        else {
-            this.setStyle({
-                height: `${this.size}px`,
-                left: 0,
-                right: 0
-            });
-        }
-
         this.addEventListener("mousedown", this.attach.bind(this));
         window.addEventListener("mouseup", () => this.release());
         this.parentNode.addEventListener("mousemove", (evt) => this.move(evt));
@@ -285,10 +314,14 @@ class Grip extends BaseUtil {
 }
 
 class Pane extends BaseUtil {
+    get resizable() {
+        return "" + this.getAttribute("resizable") != "false";
+    }
+
     calculateSize() {
         const { availableSize, panels } = this.parentNode;
 
-        let size = this.firstChild.getAttribute("pane-size");
+        let size = this.getAttribute("sxize");
 
         if (/px$/.test(size))
             size = parseInt(size, 10);
@@ -303,33 +336,21 @@ class Pane extends BaseUtil {
     }
 
     connectedCallback() {
-        this.setStyle({
-            zIndex: 50,
-            display: "block",
-            boxSizing: "border-box",
-            position: "absolute",
-            overflow: "auto",
-            height: "100%",
-            width: "100%",
-            backgroundColor: "#009",
-            border: "1px solid black",
-        });
-
-        this.calculateSize();
-        this.connected = true;
-
         let event = new CustomEvent("connected", { target: this });
+
+        this.connected = true;
+        this.calculateSize();
         this.dispatchEvent(event);
     }
 }
 
 const DEFAULT_NAMESPACE = "x-split-pane";
 
-function register(namespace=DEFAULT_NAMESPACE) {
-    customElements.define('x-split-pane-component', Wrapper);
-    customElements.define('x-split-pane-hgrip', Grip);
-    customElements.define('x-split-pane-hpane', Pane);
-    customElements.define('x-split-pane', Component);
+function register(namespace = DEFAULT_NAMESPACE) {
+    customElements.define(DEFAULT_NAMESPACE, Wrapper);
+    customElements.define('x-split-pane-grip', Grip);
+    customElements.define('x-split-pane-pane', Pane);
+    customElements.define('x-split-pane-panels', Component);
 }
 
 return register;
