@@ -1,22 +1,3 @@
-function h(el, attributes, ...contents) {
-    const parent = document.createElement(el);
-
-    if (attributes) {
-        for (let key in attributes) {
-            parent.setAttribute(key, attributes[key]);
-        }
-    }
-
-    contents.forEach(content => {
-        if (typeof content == "string")
-            content = document.createTextNode(content);
-
-        parent.appendChild(content);
-    });
-
-    return parent;
-}
-
 const css = `
     <style>
         :host {
@@ -24,13 +5,18 @@ const css = `
         }
         
         .grip {
+            flex-shrink: 0;
+            flex-grow: 0;
+        }
+        
+        .cols .grip {
             width: 4px;
             background: red;
             cursor: col-resize;            
             
         }
         
-        .grip.rows {
+        .rows .grip {
             height: 4px;
             background: blue;
             cursor: row-resize;            
@@ -42,9 +28,13 @@ const css = `
             box-sizing: border-box;
         }
         
+        .panels.rows {
+            background: green;
+            flex-direction: column;
+        }
+        
         .pane {
             box-sizing: border-box;
-            background: #eef;
             flex-grow: 1;
             overflow: hidden;
         }
@@ -52,10 +42,20 @@ const css = `
 `;
 
 class Wrapper extends HTMLElement {
+    get collumns() {
+        return this.getAttribute("direction") != "rows";
+    }
+
+    get size() {
+        if (this.collumns)
+            return this.clientWidth;
+        this.clientHeight;
+    }
+
     constructor() {
         super();
         const root = this.createShadowRoot();
-        const panes = h("div", {
+        const panes = this.getElement("div", {
             class: "panels"
         });
 
@@ -71,63 +71,64 @@ class Wrapper extends HTMLElement {
         });
     }
 
+    connectedCallback() {
+        this.style.display = "block";
+        this.panes.classList.add(this.collumns ? "cols" : "rows");
+    }
+
+    getElement(tagName, attributes) {
+        const element = document.createElement(tagName);
+
+        for (let key in attributes) {
+            element.setAttribute(key, attributes[key]);
+        }
+
+        return element;
+    }
+
     appendChild(content) {
-        let pane = h("div", {
+        const pane = this.getElement("div", {
             class: "pane"
         });
-        
+
         if (this.panes.children.length)
             this.appendGrip();
-            
+
         pane.appendChild(content);
         this.panes.appendChild(pane);
     }
 
     appendGrip() {
-        let grip = h("div", {
+        const grip = this.getElement("div", {
             class: "grip"
         });
         grip.addEventListener("mousedown", this.activate.bind(this));
         this.panes.appendChild(grip);
     }
 
-    connectedCallback() {
-        this.style.display = "block";
-        // this.panes.style.height = this.style.height;
-        this.panes.setAttribute("direction", this.getAttribute("direction") || "cols");
-    }
 
-    get isColumns() {
-        return this.getAttribute("direction") != "rows";
-    }
-    
-    get size() {
-        if (this.isColumns)
-            return this.clientWidth;
-        this.clientHeight;
-    }
-    
     getClientSize(child) {
-        if (this.isColumns)
+        if (this.collumns)
             return child.clientWidth;
         child.clientHeight;
     }
 
     clientPos(evt) {
-        if (this.isColumns)
+        if (this.collumns)
             return evt.clientX;
         return evt.clientY;
     }
 
     activate(evt) {
-        let {target} = evt;
-        
+        evt.preventDefault();
+        let { target } = evt;
+
         let clientPos = this.clientPos(evt);
         let children = Array.from(this.panes.children);
-        let panes = children.filter(child => /pane/.test(child.className));
+        let panes = children.filter(child => child.classList.contains("pane"));
         let prev = children[children.indexOf(target) - 1];
         let sizes = panes.map(pane => (this.getClientSize(pane) / this.size) * 100);
-        
+
         this.active = true;
         this.distribute(panes, sizes);
 
@@ -137,17 +138,17 @@ class Wrapper extends HTMLElement {
             clientPos
         };
     }
-    
+
     distribute(panes, sizes) {
         for (let child of panes) {
             child.style.flexBasis = sizes.shift() + "%";
         }
     }
-    
+
     resize(evt) {
         if (!this.active) return;
-        
-        let {panes, prev, clientPos} = this.pos;
+
+        let { panes, prev, clientPos } = this.pos;
         let evtClientPos = this.clientPos(evt);
         let delta = clientPos - evtClientPos;
         let prevSize = (this.getClientSize(prev) - delta) / this.size * 100;
@@ -157,28 +158,30 @@ class Wrapper extends HTMLElement {
         if (prevSize < 0)
             return;
 
-        let sizeRight = panes.reduce((sum, pane) => {
-        	if (pane == prev) return sum;
-			return sum += this.getClientSize(pane);
+        let currentSize = panes.reduce((sum, pane) => {
+            if (pane == prev) return sum;
+            return sum += this.getClientSize(pane);
         }, 0);
 
-        // get the new right
-        let newRight = sizeRight + delta;
+        let newSize = currentSize + delta;
 
-        // first, get percentage of the right for each pane right
-        // get size in pixel for the new right
-        // then get percentage of the total
-        let sizes = panes.map((pane) => {
-        	if (pane == prev)
-            	return prevSize;
+        let sizes = panes.map((pane, i) => {
+            if (pane == prev)
+                return prevSize;
 
-            let newSizePixel = Math.round((this.getClientSize(pane) / sizeRight) * newRight);
+            if (currentSize <= 0)
+                return 0;
+
+            let size = this.getClientSize(pane) || 1;
+
+            let newSizePixel = Math.round((size / currentSize) * newSize);
+
             return (newSizePixel / this.size) * 100;
         });
-        
+
         this.distribute(panes, sizes);
     }
-    
+
 }
 
 export { Wrapper };
