@@ -5,20 +5,18 @@ const css = `
         }
         
         .grip {
+            background: #e8e8e8;
             flex-shrink: 0;
             flex-grow: 0;
         }
         
         .cols .grip {
             width: 4px;
-            background: red;
-            cursor: col-resize;            
-            
+            cursor: col-resize;
         }
         
         .rows .grip {
             height: 4px;
-            background: blue;
             cursor: row-resize;            
         }
 
@@ -29,14 +27,22 @@ const css = `
         }
         
         .panels.rows {
-            background: green;
             flex-direction: column;
         }
         
         .pane {
             box-sizing: border-box;
-            flex-grow: 1;
             overflow: hidden;
+            height: 100%;
+            width: 100%;
+        }
+        
+        .scroll {
+            box-sizing: border-box;
+            height: 100%;
+            widht: 100%;
+            overflow: auto;
+            border: 1px inset #eee;
         }
     </style>
 `;
@@ -49,7 +55,7 @@ class Wrapper extends HTMLElement {
     get size() {
         if (this.collumns)
             return this.clientWidth;
-        this.clientHeight;
+        return this.clientHeight;
     }
 
     constructor() {
@@ -73,7 +79,12 @@ class Wrapper extends HTMLElement {
 
     connectedCallback() {
         this.style.display = "block";
+        this.style.height = "100%";
         this.panes.classList.add(this.collumns ? "cols" : "rows");
+        
+        for (let child of Array.from(this.children)) {
+            this.appendPane(child);
+        }
     }
 
     getElement(tagName, attributes) {
@@ -85,16 +96,25 @@ class Wrapper extends HTMLElement {
 
         return element;
     }
-
+    
     appendChild(content) {
+        this.appendPane(content);
+    }
+
+    appendPane(content) {
         const pane = this.getElement("div", {
             class: "pane"
+        });
+        
+        const viewport = this.getElement("div", {
+            class: "scroll"
         });
 
         if (this.panes.children.length)
             this.appendGrip();
 
-        pane.appendChild(content);
+        viewport.appendChild(content);
+        pane.appendChild(viewport);
         this.panes.appendChild(pane);
     }
 
@@ -110,7 +130,7 @@ class Wrapper extends HTMLElement {
     getClientSize(child) {
         if (this.collumns)
             return child.clientWidth;
-        child.clientHeight;
+        return child.clientHeight;
     }
 
     clientPos(evt) {
@@ -127,7 +147,7 @@ class Wrapper extends HTMLElement {
         let children = Array.from(this.panes.children);
         let panes = children.filter(child => child.classList.contains("pane"));
         let prev = children[children.indexOf(target) - 1];
-        let sizes = panes.map(pane => (this.getClientSize(pane) / this.size) * 100);
+        let sizes = panes.map(pane => Math.round((this.getClientSize(pane) / this.size) * 100));
 
         this.active = true;
         this.distribute(panes, sizes);
@@ -169,15 +189,15 @@ class Wrapper extends HTMLElement {
             if (pane == prev)
                 return prevSize;
 
-            if (currentSize <= 0)
-                return 0;
+            currentSize = currentSize || 1;
 
             let size = this.getClientSize(pane) || 1;
-
             let newSizePixel = Math.round((size / currentSize) * newSize);
 
             return (newSizePixel / this.size) * 100;
         });
+        
+        console.log(sizes);
 
         this.distribute(panes, sizes);
     }
