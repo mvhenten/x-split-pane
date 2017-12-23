@@ -1,9 +1,5 @@
 const css = `
     <style>
-        :host {
-            // height: 100%;
-        }
-        
         .grip {
             background: #e8e8e8;
             flex-shrink: 0;
@@ -32,17 +28,15 @@ const css = `
         
         .pane {
             box-sizing: border-box;
-            overflow: hidden;
+            background-color: #fcc;
+            overflow: auto;
+            // border: 1px inset green;
             height: 100%;
             width: 100%;
         }
         
-        .scroll {
-            box-sizing: border-box;
-            height: 100%;
-            widht: 100%;
-            overflow: auto;
-            border: 1px inset #eee;
+        .pane > * {
+            background: #ccc;
         }
     </style>
 `;
@@ -67,6 +61,7 @@ class Wrapper extends HTMLElement {
 
         root.innerHTML = css;
         root.appendChild(panes);
+        
 
         this.panes = panes;
         this.root = root;
@@ -105,16 +100,11 @@ class Wrapper extends HTMLElement {
         const pane = this.getElement("div", {
             class: "pane"
         });
-        
-        const viewport = this.getElement("div", {
-            class: "scroll"
-        });
 
         if (this.panes.children.length)
             this.appendGrip();
 
-        viewport.appendChild(content);
-        pane.appendChild(viewport);
+        pane.appendChild(content);
         this.panes.appendChild(pane);
     }
 
@@ -128,9 +118,12 @@ class Wrapper extends HTMLElement {
 
 
     getClientSize(child) {
+        let rect = child.getBoundingClientRect();
+
         if (this.collumns)
-            return child.clientWidth;
-        return child.clientHeight;
+            return rect.width;
+            
+        return rect.height;
     }
 
     clientPos(evt) {
@@ -147,6 +140,7 @@ class Wrapper extends HTMLElement {
         let children = Array.from(this.panes.children);
         let panes = children.filter(child => child.classList.contains("pane"));
         let prev = children[children.indexOf(target) - 1];
+        
         let sizes = panes.map(pane => Math.round((this.getClientSize(pane) / this.size) * 100));
 
         this.active = true;
@@ -192,13 +186,11 @@ class Wrapper extends HTMLElement {
             currentSize = currentSize || 1;
 
             let size = this.getClientSize(pane) || 1;
-            let newSizePixel = Math.round((size / currentSize) * newSize);
+            let newSizePixel = (size / currentSize) * newSize;
 
-            return (newSizePixel / this.size) * 100;
+            return Math.round((newSizePixel / this.size) * 100);
         });
         
-        console.log(sizes);
-
         this.distribute(panes, sizes);
     }
 
