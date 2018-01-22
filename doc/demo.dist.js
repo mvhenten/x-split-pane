@@ -4,6 +4,292 @@
 	(factory());
 }(this, (function () { 'use strict';
 
+const css = `
+    <style>
+        .grip {
+            background: #e8e8e8;
+            flex-shrink: 0;
+            flex-grow: 0;
+        }
+        
+        .cols .grip {
+            width: 4px;
+            cursor: col-resize;
+        }
+        
+        .rows .grip {
+            height: 4px;
+            cursor: row-resize;            
+        }
+
+        .panels {
+            display: flex;
+            height: 100%;
+            box-sizing: border-box;
+        }
+        
+        .panels.rows {
+            flex-direction: column;
+        }
+        
+        .pane {
+            box-sizing: border-box;
+            background-color: #fcc;
+            overflow: auto;
+            // border: 1px inset green;
+            height: 100%;
+            width: 100%;
+        }
+        
+        .pane > * {
+            background: #ccc;
+        }
+    </style>
+`;
+
+function getSize(columns, pane) {
+    let rect = pane.getBoundingClientRect();
+    let size = columns ? rect.height : rect.width;
+    
+    return {size};
+}
+
+class Wrapper extends HTMLElement {
+    get collumns() {
+        return this.getAttribute("direction") != "rows";
+    }
+
+    get size() {
+        let rect = this.getBoundingClientRect();
+
+        if (this.collumns)
+            return rect.width;
+            
+        return rect.height;
+    }
+
+    constructor() {
+        super();
+        const root = this.createShadowRoot();
+        const panes = this.getElement("div", {
+            class: "panels"
+        });
+
+        root.innerHTML = css;
+        root.appendChild(panes);
+        
+
+        this.panes = panes;
+        this.root = root;
+
+        document.addEventListener("mousemove", this.resize.bind(this));
+        document.addEventListener("mouseup", () => {
+            this.active = false;
+        });
+    }
+
+    connectedCallback() {
+        this.style.display = "block";
+        this.style.height = "100%";
+        this.panes.classList.add(this.collumns ? "cols" : "rows");
+        
+        for (let child of Array.from(this.children)) {
+            this.appendPane(child);
+        }
+    }
+
+    getElement(tagName, attributes) {
+        const element = document.createElement(tagName);
+
+        for (let key in attributes) {
+            element.setAttribute(key, attributes[key]);
+        }
+
+        return element;
+    }
+    
+    appendChild(content) {
+        this.appendPane(content);
+    }
+
+    appendPane(content) {
+        const pane = this.getElement("div", {
+            class: "pane"
+        });
+
+        if (this.panes.children.length)
+            this.appendGrip();
+
+        pane.appendChild(content);
+        this.panes.appendChild(pane);
+    }
+
+    appendGrip() {
+        const grip = this.getElement("div", {
+            class: "grip"
+        });
+        grip.addEventListener("mousedown", this.activate.bind(this));
+        this.panes.appendChild(grip);
+    }
+
+
+    getClientSize(child) {
+        let rect = child.getBoundingClientRect();
+
+        if (this.collumns)
+            return rect.width;
+            
+        return rect.height;
+    }
+
+    clientPos(evt) {
+        if (this.collumns)
+            return evt.clientX;
+        return evt.clientY;
+    }
+
+    activate(evt) {
+        evt.preventDefault();
+        let { target } = evt;
+        
+        let clientPos = this.clientPos(evt);
+        
+        let panes = Array.from(this.panes.children)
+            .filter(child => child.classList.contains("pane"));
+            
+        let index   = panes.indexOf(target.previousElementSibling);
+        let sizes = panes.map(pane => getSize(this.columns, pane));
+        
+        this.active = true;
+        this.distribute(panes, sizes);
+
+        this.pos = {
+            panes: panes,
+            index,
+            clientPos
+        };
+    }
+
+    distribute(panes, sizes) {
+        for (let child of panes) {
+            let size = sizes.shift();
+            let pct  = 100 * (size.size / this.size);
+            child.style.flexBasis = pct + "%";
+        }
+    }
+
+    resize(evt) {
+        if (!this.active) return;
+
+        let { panes, index, clientPos } = this.pos;
+        let evtClientPos = this.clientPos(evt);
+        let delta = clientPos - evtClientPos;
+        
+        let sizes = panes.map(pane => getSize(this.columns, pane));
+        
+        let newSizes = distribute(sizes, index, delta);
+        
+        this.pos.clientPos = evtClientPos;
+        
+        this.distribute(panes, newSizes);
+    }
+
+}
+
+
+function sum(panes, prop) {
+    return panes.reduce((sum, pane) => {
+        if (pane[prop])
+            sum += pane[prop];
+            
+        return sum;
+    }, 0);
+}
+
+function distribute(panes, index, delta) {
+    // grip always belongs to the right side of a pane
+    // if going to the left, resize the next pane
+    let active = delta < 0 ? index : index + 1;
+    
+    console.log("active", active);
+    
+    panes = panes.map(pane => Object.assign({}, pane));
+    
+    let absDelta = Math.abs(delta);
+
+    // start with active pane.
+    // if new size exceeds maxSize, return
+    
+    let activePane = panes[active];
+    
+    let newActiveSize = activePane.size + absDelta;
+    
+    if (activePane.maxSize && newActiveSize > activePane.maxSize)
+        return panes;
+
+    // if we resize to the left, we grow the right panel
+    //    we then resize all panels to the left
+    
+    // [][] <- [...][][]
+    // if we resize to the right, we grow the left panel
+    //    then resize all panels to the right
+    // [][][...] -> [][]
+    
+    let leftPanes = panes.slice(0, active);
+    let rightPanes = panes.slice(active+1);
+
+    // check all panes in the resize area
+    // check if they have a minimWidth
+    // if minWidth > newSize abort
+    
+    let resizePanes = delta < 0 ? rightPanes : leftPanes;
+    let growPanes  = delta < 0 ? leftPanes : rightPanes;
+
+    let oldSize = sum(resizePanes, "size");
+    let minSize = sum(resizePanes, "minSize");
+    let newSize = oldSize -absDelta;
+    
+    if (newSize < minSize)
+        return panes;
+
+    // resizing
+    // if all panels we are growing are equal equal in size,
+    // we resize them equally using newSize / panels
+    
+    // todo check we are not violating maxSize 
+    let allEqual = growPanes.every(pane => Math.round(pane.size) == Math.round(activePane.size));
+
+    if (allEqual) {
+        let newGrowSize = sum(growPanes, "size") + absDelta + activePane.size;
+        let newPaneSize = newGrowSize / (growPanes.length + 1);
+
+        growPanes.forEach(pane => pane.size = newPaneSize);
+        activePane.size = newPaneSize;
+    }
+    else {
+        activePane.size = newActiveSize;
+    }
+
+    // we resize them by taking the (paneSize / oldSize) * newSize
+    // only resize panes if their new size > minSize
+    // ms: 100, 100, 100 (30%, 30%)
+    // substract panes we don't resize from oldSize
+    // todo: check minSize
+    resizePanes.forEach(pane => {
+        if (!pane.size)
+            return;
+        pane.size = (pane.size / oldSize) * newSize;
+    });
+    
+    return panes;
+}
+
+const DEFAULT_NAMESPACE = "x-split-pane";
+
+function register(namespace = DEFAULT_NAMESPACE) {
+    customElements.define(DEFAULT_NAMESPACE, Wrapper);
+}
+
 function h(el, attributes, ...contents) {
     const parent = document.createElement(el);
 
@@ -23,329 +309,23 @@ function h(el, attributes, ...contents) {
     return parent;
 }
 
-class StyleUtil extends HTMLElement {
-    setStyle(style) {
-        for (let key in style) {
-            this.style[key] = style[key];
-        }
-    }
-}
-
-class BaseUtil extends StyleUtil {
-    constructor() {
-        super();
-        this.dimensions = {};
-    }
-
-    get size() {
-        if (this.dimensions.size)
-            return this.dimensions.size;
-
-        let key = this.parentNode.horizontal ? "clientWidth" : "clientHeight";
-        return this[key];
-    }
-
-    set size(value) {
-        let key = this.parentNode.horizontal ? "width" : "height";
-        this.style[key] = `${value}px`;
-        this.dimensions.size = value;
-    }
-
-    set offset(value) {
-        let key = this.parentNode.horizontal ? "left" : "top";
-        this.style[key] = `${value}px`;
-        this.dimensions.offset = value;
-    }
-
-    get offset() {
-        return this.dimensions.offset;
-    }
-}
-
-class Wrapper extends StyleUtil {
-    constructor() {
-        super();
-
-        const panes = h("x-split-pane", {
-            direction: this.getAttribute("pane-direction")
-        });
-
-        this.panes = panes;
-        this.root = this.createShadowRoot();
-        this.root.appendChild(panes);
-
-        window.addEventListener("resize", () => {
-            panes.distribute();
-        });
-    }
-
-    connectedCallback() {
-        this.setStyle({
-            display: "block",
-            position: "relative",
-            width: "100%",
-            height: "100%",
-            backgroundColor: "#990000"
-        });
-    }
-
-    appendChild(...args) {
-        this.panes.appendChild(...args);
-    }
-}
-
-class Component extends StyleUtil {
-    get size() {
-        return this.horizontal ? this.clientWidth : this.clientHeight;
-    }
-
-    get horizontal() {
-        return this.getAttribute("pane-direction") != "vertical";
-    }
-
-    connectedCallback() {
-        this.setStyle({
-            display: "block",
-            position: "absolute",
-            top: 0,
-            bottom: 0,
-            left: 0,
-            right: 0,
-        });
-
-        this.mounted = true;
-        this.distribute();
-    }
-
-    get panels() {
-        return Array.from(this.children)
-            .filter(child => !child.isGrip);
-    }
-
-    get availableSize() {
-        return Array.from(this.children).reduce((size, child) => {
-            if (child.isGrip)
-                return size - child.size;
-            return size;
-        }, this.size);
-    }
-
-    appendChild(...args) {
-        if (this.childNodes.length)
-            this.appendGrip();
-
-        this.appendPanel(...args);
-    }
-
-    appendPanel(content) {
-        const slot = h("slot", null, content);
-
-        const attributes = {
-            "pane-direction": this.getAttribute("pane-direction"),
-            "pane-size": content.getAttribute("pane-size"),
-            "pane-resizable": content.getAttribute("pane-resizable")
-        };
-
-        const pane = h("x-split-pane-hpane", attributes, slot);
-
-        super.appendChild(pane);
-        pane.addEventListener("connected", () => this.distribute());
-    }
-
-    appendGrip() {
-        const grip = h("x-split-pane-hgrip");
-        super.appendChild(grip);
-
-        grip.addEventListener("move", ({ target, detail }) => {
-            this.resizePane(target, detail);
-        });
-    }
-
-    resizePane(grip, delta) {
-        let before = grip.previousSibling;
-        let after = grip.nextSibling;
-        let offset = grip.offset + delta;
-
-        if (before.offset > offset)
-            return;
-
-        if (after.size - delta <= 0)
-            return;
-
-        before.size = before.size + delta;
-        after.size = after.size - delta;
-        after.offset = after.offset + delta;
-        grip.offset = grip.offset + delta;
-    }
-
-    calculatePanelSize() {
-        const { availableSize, panels } = this;
-        const panelSize = panels.reduce((panelSize, panel) => panelSize += panel.size, 0);
-
-        let allocatedSize = 0;
-
-        return panels.map((panel, index) => {
-            if (index == panels.length - 1)
-                return availableSize - allocatedSize;
-
-            const scale = panel.size / panelSize;
-            const size = Math.round(availableSize * scale);
-
-            allocatedSize += size;
-
-            return size;
-        });
-    }
-
-    distribute() {
-        if (!this.panels.every(panel => panel.connected))
-            return;
-
-        const panelSizes = this.calculatePanelSize();
-        let offset = 0;
-
-        Array.from(this.children).forEach((child, index) => {
-            if (!child.isGrip)
-                child.size = panelSizes.shift();
-
-            child.offset = offset;
-            offset += child.size;
-        });
-    }
-}
-
-class Grip extends BaseUtil {
-    get isGrip() {
-        return true;
-    }
-
-    get size() {
-        return this.getAttribute("grip-size") || 4;
-    }
-
-    set size(value) {
-        throw new Error("You cannot set grip size");
-    }
-
-    move(evt) {
-        if (!this.active)
-            return;
-
-        if (evt.stopPropagation) evt.stopPropagation();
-        if (evt.preventDefault) evt.preventDefault();
-
-        let key = this.parentNode.horizontal ? "screenX" : "screenY";
-        let pos = evt[key];
-        let delta = pos - this.pos;
-
-        let event = new CustomEvent("move", { target: this, detail: delta });
-
-        this.pos = pos;
-        this.dispatchEvent(event);
-    }
-
-    attach(evt) {
-        this.active = true;
-        let key = this.parentNode.horizontal ? "screenX" : "screenY";
-        this.pos = evt[key];
-    }
-
-    release(evt) {
-        this.active = null;
-    }
-
-    connectedCallback() {
-        this.setStyle({
-            zIndex: 100,
-            cursor: "pointer",
-            boxSizing: "border-box",
-            display: "block",
-            position: "absolute",
-        });
-
-        if (this.parentNode.horizontal) {
-            this.setStyle({
-                width: `${this.size}px`,
-                top: 0,
-                bottom: 0
-            });
-        }
-        else {
-            this.setStyle({
-                height: `${this.size}px`,
-                left: 0,
-                right: 0
-            });
-        }
-
-        this.addEventListener("mousedown", this.attach.bind(this));
-        window.addEventListener("mouseup", () => this.release());
-        this.parentNode.addEventListener("mousemove", (evt) => this.move(evt));
-    }
-}
-
-class Pane extends BaseUtil {
-    calculateSize() {
-        const { availableSize, panels } = this.parentNode;
-
-        let size = this.firstChild.getAttribute("pane-size");
-
-        if (/px$/.test(size))
-            size = parseInt(size, 10);
-
-        if (/%$/.test(size))
-            size = availableSize * (parseInt(size, 10) / 100);
-
-        if (!size)
-            size = availableSize / panels.length;
-
-        this.size = size;
-    }
-
-    connectedCallback() {
-        this.setStyle({
-            zIndex: 50,
-            display: "block",
-            boxSizing: "border-box",
-            position: "absolute",
-            overflow: "auto",
-            height: "100%",
-            width: "100%",
-            backgroundColor: "#009",
-            border: "1px solid black",
-        });
-
-        this.calculateSize();
-        this.connected = true;
-
-        let event = new CustomEvent("connected", { target: this });
-        this.dispatchEvent(event);
-    }
-}
-
-const DEFAULT_NAMESPACE = "x-split-pane";
-
-function register(namespace=DEFAULT_NAMESPACE) {
-    customElements.define('x-split-pane-component', Wrapper);
-    customElements.define('x-split-pane-hgrip', Grip);
-    customElements.define('x-split-pane-hpane', Pane);
-    customElements.define('x-split-pane', Component);
-}
 
 register();
 
-var x = h("x-split-pane-component", { direction: "horizontal" });
+var x = h("x-split-pane", { 
+    "direction": "rows",
+    "grip-size": 1
+});
 
-var list = new Array(100).fill(1).map(i => h("li", { style: "padding: 1em; background: #099", size: "50%" }, "Hello " + i));
+var list = new Array(100).fill(1).map(i => h("li", { style: "padding: 1em; border-bottom:1px solid silver;", size: "50%" }, "Hello " + i));
 
-x.appendChild(h("div", { style: "border: 4px solid red" }, "one"));
-x.appendChild(h("ul", { style: "list-style: none; padding: 0; margin:0" }, ...list));
-x.appendChild(h("div", { "panel-size": "50%", style: "border: 4px solid red" }, "three"));
+x.appendChild(h("div", { style: "padding: 1em", resizable: false, size: "300px" }, "one"));
+x.appendChild(h("ul", { style: "list-style: none; padding: 0; margin:0;" }, ...list));
+x.appendChild(h("div", { style: "padding: 1em" }, ...list));
+x.appendChild(h("div", { style: "padding: 1em" }, "four"));
 
-// setTimeout(() => x.distribute(), 100);
+// x.style.height = "80vh";
 
-
-
-document.getElementById("content").appendChild(x);
+// document.getElementById("content").appendChild(x);
 
 })));
