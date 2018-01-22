@@ -7,12 +7,16 @@
     "rollup": "^0.52.1"
   },
   "devDependencies": {
+    "babel-cli": "^6.26.0",
+    "babel-plugin-transform-es2015-modules-commonjs": "^6.26.0",
+    "es-module-loader": "^2.2.8",
+    "tape": "^4.8.0",
     "watchy": "^0.7.0"
   },
   "scripts": {
     "build": "rollup src/index.js --output.format umd --name 'x-split-pane' --output.file dist/index.js",
     "watch": "watchy -w src -- npm run build",
-    "demo": "rollup doc/demo.js --output.format umd --name 'x-split-pane' --output.file doc/demo.dist.js",
+    "demo": "rollup docs/demo.js --output.format umd --name 'x-split-pane' --output.file docs/demo.dist.js",
     "watch-demo": "watchy -w src -- npm run demo",
     "test": "tape **/*_test.js"
   },
