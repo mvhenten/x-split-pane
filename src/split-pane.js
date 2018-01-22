@@ -41,15 +41,25 @@ const css = `
     </style>
 `;
 
+function getSize(columns, pane) {
+    let rect = pane.getBoundingClientRect();
+    let size = columns ? rect.height : rect.width;
+    
+    return {size};
+}
+
 class Wrapper extends HTMLElement {
     get collumns() {
         return this.getAttribute("direction") != "rows";
     }
 
     get size() {
+        let rect = this.getBoundingClientRect();
+
         if (this.collumns)
-            return this.clientWidth;
-        return this.clientHeight;
+            return rect.width;
+            
+        return rect.height;
     }
 
     constructor() {
@@ -135,65 +145,138 @@ class Wrapper extends HTMLElement {
     activate(evt) {
         evt.preventDefault();
         let { target } = evt;
-
-        let clientPos = this.clientPos(evt);
-        let children = Array.from(this.panes.children);
-        let panes = children.filter(child => child.classList.contains("pane"));
-        let prev = children[children.indexOf(target) - 1];
         
-        let sizes = panes.map(pane => Math.round((this.getClientSize(pane) / this.size) * 100));
-
+        let clientPos = this.clientPos(evt);
+        
+        let panes = Array.from(this.panes.children)
+            .filter(child => child.classList.contains("pane"));
+            
+        let index   = panes.indexOf(target.previousElementSibling);
+        let sizes = panes.map(pane => getSize(this.columns, pane));
+        
         this.active = true;
         this.distribute(panes, sizes);
 
         this.pos = {
-            panes: panes.slice(panes.indexOf(prev)),
-            prev,
+            panes: panes,
+            index,
             clientPos
         };
     }
 
     distribute(panes, sizes) {
         for (let child of panes) {
-            child.style.flexBasis = sizes.shift() + "%";
+            let size = sizes.shift();
+            let pct  = 100 * (size.size / this.size);
+            child.style.flexBasis = pct + "%";
         }
     }
 
     resize(evt) {
         if (!this.active) return;
 
-        let { panes, prev, clientPos } = this.pos;
+        let { panes, index, clientPos } = this.pos;
         let evtClientPos = this.clientPos(evt);
         let delta = clientPos - evtClientPos;
-        let prevSize = (this.getClientSize(prev) - delta) / this.size * 100;
-
-        this.pos.clientPos = evtClientPos;
-
-        if (prevSize < 0)
-            return;
-
-        let currentSize = panes.reduce((sum, pane) => {
-            if (pane == prev) return sum;
-            return sum += this.getClientSize(pane);
-        }, 0);
-
-        let newSize = currentSize + delta;
-
-        let sizes = panes.map((pane, i) => {
-            if (pane == prev)
-                return prevSize;
-
-            currentSize = currentSize || 1;
-
-            let size = this.getClientSize(pane) || 1;
-            let newSizePixel = (size / currentSize) * newSize;
-
-            return Math.round((newSizePixel / this.size) * 100);
-        });
         
-        this.distribute(panes, sizes);
+        let sizes = panes.map(pane => getSize(this.columns, pane));
+        
+        let newSizes = distribute(sizes, index, delta);
+        
+        this.pos.clientPos = evtClientPos;
+        
+        this.distribute(panes, newSizes);
     }
 
 }
+
+
+function sum(panes, prop) {
+    return panes.reduce((sum, pane) => {
+        if (pane[prop])
+            sum += pane[prop];
+            
+        return sum;
+    }, 0);
+}
+
+function distribute(panes, index, delta) {
+    // grip always belongs to the right side of a pane
+    // if going to the left, resize the next pane
+    let active = delta < 0 ? index : index + 1;
+    
+    console.log("active", active);
+    
+    panes = panes.map(pane => Object.assign({}, pane));
+    
+    let absDelta = Math.abs(delta);
+
+    // start with active pane.
+    // if new size exceeds maxSize, return
+    
+    let activePane = panes[active];
+    
+    let newActiveSize = activePane.size + absDelta;
+    
+    if (activePane.maxSize && newActiveSize > activePane.maxSize)
+        return panes;
+
+    // if we resize to the left, we grow the right panel
+    //    we then resize all panels to the left
+    
+    // [][] <- [...][][]
+    // if we resize to the right, we grow the left panel
+    //    then resize all panels to the right
+    // [][][...] -> [][]
+    
+    let leftPanes = panes.slice(0, active);
+    let rightPanes = panes.slice(active+1);
+
+    // check all panes in the resize area
+    // check if they have a minimWidth
+    // if minWidth > newSize abort
+    
+    let resizePanes = delta < 0 ? rightPanes : leftPanes;
+    let growPanes  = delta < 0 ? leftPanes : rightPanes;
+
+    let oldSize = sum(resizePanes, "size");
+    let minSize = sum(resizePanes, "minSize");
+    let newSize = oldSize -absDelta;
+    
+    if (newSize < minSize)
+        return panes;
+
+    // resizing
+    // if all panels we are growing are equal equal in size,
+    // we resize them equally using newSize / panels
+    
+    // todo check we are not violating maxSize 
+    let allEqual = growPanes.every(pane => Math.round(pane.size) == Math.round(activePane.size));
+
+    if (allEqual) {
+        let newGrowSize = sum(growPanes, "size") + absDelta + activePane.size;
+        let newPaneSize = newGrowSize / (growPanes.length + 1);
+
+        growPanes.forEach(pane => pane.size = newPaneSize);
+        activePane.size = newPaneSize;
+    }
+    else {
+        activePane.size = newActiveSize;
+    }
+
+    // we resize them by taking the (paneSize / oldSize) * newSize
+    // only resize panes if their new size > minSize
+    // ms: 100, 100, 100 (30%, 30%)
+    // substract panes we don't resize from oldSize
+    // todo: check minSize
+    resizePanes.forEach(pane => {
+        if (!pane.size)
+            return;
+        pane.size = (pane.size / oldSize) * newSize;
+    });
+    
+    return panes;
+}
+
 
 export { Wrapper };
